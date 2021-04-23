@@ -8,7 +8,7 @@ from pymongo import MongoClient
 import yfinance as yf
 
 def main():
-    client = pymongo.MongoClient("mongodb+srv://JoeAdmin:WjKEWzlU01Ijv5ZG@cluster0.xu5is.mongodb.net/?retryWrites=true&w=majority")
+    client = pymongo.MongoClient("mongodb+srv://first_user:JEfzAAafaC5mDH6l@cluster0.v5psh.mongodb.net/findMyGME?retryWrites=true&w=majority")
     collection = client["findMyGME"]["stocks"]
 
     nasdaq_dict = {}
