@@ -1,104 +1,81 @@
 import time
 from datetime import datetime
 
-import praw
 import pymongo
 from pymongo import MongoClient
 
+import praw
+
 import yfinance as yf
+from dotenv import load_dotenv
 
-def main():
-    client = pymongo.MongoClient("mongodb+srv://first_user:JEfzAAafaC5mDH6l@cluster0.v5psh.mongodb.net/findMyGME?retryWrites=true&w=majority")
-    collection = client["findMyGME"]["stocks"]
+import dotenv
+import os
 
-    nasdaq_dict = {}
-    nyse_dict = {}
-    ticker_dict = {}
 
-    with open("Ticker Symbols/NASDAQ.txt", "r") as nasdaq:
-        lines = [line.strip() for line in nasdaq.readlines()]
-        for line in lines:
-            if len(line.split("\t")) >= 2:
-                symbol = line.split("\t")[0]
-                name = line.split("\t")[1]
-                nasdaq_dict[symbol] = name
-                ticker_dict[symbol] = name
-            # else:
-            #     print(f"empty line in nasdaq: {line}")
-
-        # print(nasdaq_dict)
-
-    with open("Ticker Symbols/NYSE.txt", "r") as nyse:
-        lines = [line.strip() for line in nyse.readlines()]
-        for line in lines:
-            if len(line.split("\t")) >= 2:
-                symbol = line.split("\t")[0]
-                name = line.split("\t")[1]
-                nyse_dict[symbol] = name
+# Reads, parses and converts the ticker files into dictionary
+def build_dictionary(file_name, ticker_dict):
+    with open(file_name, 'r') as file:
+        for line in file:
+            line_list = line.strip().split("\t")
+            if len(line_list) >= 2:
+                symbol = line_list[0]
+                name = line_list[1]
                 if symbol not in ticker_dict:
-                    #     print(f"{symbol} already exists in NASDAQ")
-                    # else:
                     ticker_dict[symbol] = name
-            # else:
-            #     print(f"empty line in nyse: {line}")
 
-    reddit = praw.Reddit(client_id="3j4aMHa4CXXC7Q", client_secret="84T5rXSssKEm5H07XBIJ4wgo1MDdRw",
-                         user_agent="for testing")
 
+# Count the tickers appeared in the titles and/or contents of the hot posts
+# Returns a dictionary with counts in non-increasing order
+def count_tickers(reddit, ticker_dict):
+    ticker_count = {}
     hot_posts = reddit.subreddit("wallstreetbets").hot(limit=500)
 
-    # print(type(hot_posts))
-
-    def add_to_dict(word_in_post, ticker_dict):
-        for word in word_in_post:
-            clean_word = word.strip()
-            if clean_word in ticker_dict:
-                ticker_count.setdefault(clean_word, 0)
-                ticker_count[clean_word] += 1
-            # else:
-            #     print(f"{clean_word} not in ticker list")
-
-    ticker_count = {}
-    # counter = 0
     for post in hot_posts:
-        # print(f"This is the {counter} post content - "
-        #       f"title: {post.title}"
-        #       f"content: {post.selftext}")
-        # counter +=1
         word_in_title = post.title.split()
-        add_to_dict(word_in_title, ticker_dict)
+        add_to_dict(word_in_title, ticker_dict, ticker_count)
         word_in_content = post.selftext.split()
-        add_to_dict(word_in_content, ticker_dict)
-
-    # print(ticker_count)
+        add_to_dict(word_in_content, ticker_dict, ticker_count)
 
     sorted_ticker_count = dict(sorted(ticker_count.items(), key=lambda item: item[1], reverse=True))
 
-    # print(sorted_ticker_count)
-    # print(f"Before clean {len(ticker_count)}")
+    return sorted_ticker_count
 
-    # A list of abbreviations generally do not represent tickers.
-    black_list = ["A", "DD", "FOR", "CEO", "ALL", "EV", "OR", "AT", "RH", "ONE", "ARE", "VERY", "ON", "EDIT"]
 
+# Helper function to aggregate the count of each ticker in ticker_count
+def add_to_dict(word_in_post, ticker_dict, ticker_count):
+    for word in word_in_post:
+        clean_word = word.strip()
+        if clean_word in ticker_dict:
+            ticker_count[clean_word] = ticker_count.get(clean_word, 0) + 1
+
+
+# Filters out the abbreviations that generally do not represent stock tickers
+def filter_dictionary(sorted_ticker_count, black_list):
     clean_sorted_ticker_dict = {}
 
     for key, value in sorted_ticker_count.items():
         if key not in black_list:
             clean_sorted_ticker_dict[key] = value
+        if len(clean_sorted_ticker_dict) == 10:
+            break
 
-    # print(clean_sorted_ticker_dict)
-    # print(f"After clean {len(clean_sorted_ticker_dict)}")
+    return clean_sorted_ticker_dict
 
-    sorted_ticker_list = list(clean_sorted_ticker_dict.keys())
 
-    # top10_toDB = {}
+# Packages the top10 tickers and related financial information into dictionaries
+# and inserts them into the database with time stamps
+def insert_to_db(sorted_ticker_list, filtered_sorted_ticker_dict, ticker_dict):
+    toDB = []
+
     now = datetime.now()
+
     for i in range(10):
         output_ticker = sorted_ticker_list[i]
-        output_count = clean_sorted_ticker_dict[output_ticker]
+        output_count = filtered_sorted_ticker_dict[output_ticker]
         stock_info = yf.Ticker(output_ticker).info
-        toDB = {
-            "rank": i+1,
+        entry = {
+            "rank": i + 1,
             "ticker": output_ticker,
             "name": ticker_dict[output_ticker],
             "industry": stock_info["industry"],
@@ -108,21 +85,44 @@ def main():
             "averageDailyVolume10Day": stock_info["averageDailyVolume10Day"],
             "timeStamp": now
         }
-        print(toDB)
-        collection.insert_one(toDB)
-        # top10_toDB[str(i)] = (output_ticker, output_count)
-        # print(f"{output_ticker}: {output_count}")
+        toDB.append(entry)
 
-    # collection.insert_one(top10_toDB)
+    print(toDB)
 
-    # print(top10_toDB)
+    collection.insert_many(toDB)
 
 
+def main():
+    # Creates a combined NASDAQ and NYSE stock ticker dictionary
+    ticker_dict = {}
+    build_dictionary("Ticker Symbols/NASDAQ.txt", ticker_dict)
+    build_dictionary("Ticker Symbols/NYSE.txt", ticker_dict)
+
+    # Counts the appearances of tickers in the top500 hot posts in WSB
+    sorted_ticker_count = count_tickers(reddit, ticker_dict)
+
+    # Filters out the abbreviations that generally do not represent stock tickers
+    # Also cuts down the size of the dictionary to 10
+    filtered_sorted_ticker_dict = filter_dictionary(sorted_ticker_count, black_list)
+
+    # Gets the list of top 10 tickers from the filtered dictionary
+    sorted_ticker_list = list(filtered_sorted_ticker_dict.keys())
+
+    # Inserts top10 tickers and the related financial information into the database
+    insert_to_db(sorted_ticker_list, filtered_sorted_ticker_dict, ticker_dict)
 
 
 if __name__ == "__main__":
-    # while True:
+    # Connects to database
+    load_dotenv()
+    client = MongoClient(os.environ['DB_URL'])
+    collection = client["findMyGME"]["stocks"]
+
+    # Creates an instance of the reddit object
+    reddit = praw.Reddit(client_id=os.environ['client_id'], client_secret=os.environ['client_secret'],
+                         user_agent=os.environ['user_agent'])
+
+    # A list of abbreviations that generally do not represent tickers.
+    black_list = ["A", "DD", "FOR", "CEO", "ALL", "EV", "OR", "AT", "RH", "ONE", "ARE", "VERY", "ON", "EDIT"]
+
     main()
-    # time_wait = 10
-    # time.sleep(time_wait * 60)
-    # print(f"Waiting {time_wait} minutes, now is {datetime.now()}")
