@@ -9,7 +9,7 @@ import yfinance as yf
 TOTAL_NUMBER_OF_STOCK = 10
 
 # A list of abbreviations that generally do not represent tickers.
-TICKER_BLACKLIST = ["A", "DD", "FOR", "CEO", "ALL", "EV", "OR", "AT", "RH", "ONE", "ARE", "VERY", "ON", "EDIT"]
+TICKER_BLACKLIST = ["A", "ALL", "ARE", "AT", "CEO", "DD", "EDIT", "EV", "FOR", "ON", "ONE", "OR", "RH", "VERY"]
 
 
 # Reads, parses and converts the ticker files into dictionary
@@ -79,7 +79,7 @@ def insert_to_db(sorted_ticker_dict, ticker_dict):
             "timeStamp": now
         }
         toDB.append(entry)
-    print(toDB)
+
     client = MongoClient(os.environ['DB_URL'])
     collection = client["findMyGME"]["stocks"]
     collection.insert_many(toDB)
