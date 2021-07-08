@@ -106,7 +106,7 @@ def insert_to_db(sorted_ticker_dict, ticker_dict):
         if len(toDB) == TOTAL_NUMBER_TO_PRESENT:
             break
 
-    print(toDB)
+    # print(toDB)
     client = MongoClient(os.environ['DB_URL'])
     collection = client['findMyGME']['stocks']
     collection.insert_many(toDB)
