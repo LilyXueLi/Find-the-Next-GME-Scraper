@@ -1,3 +1,4 @@
 pymongo[tls,srv]
 praw
 yfinance
+dotenv
