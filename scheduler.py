@@ -5,18 +5,25 @@ import praw
 from pymongo import MongoClient
 import yfinance as yf
 
-# Number of most discussed stocks
-TOTAL_NUMBER_OF_STOCK = 10
+# Number of the most discussed stocks
+TOTAL_NUMBER_TO_PRESENT = 10
+
+# Number of the most discussed stocks we save
+# in case Yahoo Finance is not able to provide information for certain stocks
+TOTAL_NUMBER_OF_STOCKS = 20
 
 # A list of abbreviations that generally do not represent tickers.
-TICKER_BLACKLIST = ["A", "ALL", "ARE", "AT", "CEO", "DD", "EDIT", "EV", "FOR", "ON", "ONE", "OR", "RH", "VERY"]
+TICKER_BLACKLIST = ['A', 'ALL', 'ARE', 'AT', 'CEO', 'DD', 'EDIT', 'EV', 'FOR', 'ON', 'ONE', 'OR', 'RH', 'VERY']
+
+# Information we look for in Yahoo Finance
+YF_INFO_FIELDS = ['industry', 'previousClose', 'fiftyDayAverage', 'averageDailyVolume10Day']
 
 
 # Reads, parses and converts the ticker files into dictionary
 def build_dictionary(file_name, ticker_dict):
     with open(file_name, 'r') as file:
         for line in file:
-            line_list = line.strip().split("\t")
+            line_list = line.strip().split('\t')
             if len(line_list) < 2:
                 continue
             symbol = line_list[0]
@@ -29,7 +36,7 @@ def build_dictionary(file_name, ticker_dict):
 # Returns a dictionary with top 10 counts in non-increasing order
 def count_tickers(reddit, ticker_dict):
     ticker_count = {}
-    hot_posts = reddit.subreddit("wallstreetbets").hot(limit=500)
+    hot_posts = reddit.subreddit('wallstreetbets').hot(limit=500)
 
     for post in hot_posts:
         word_in_title = post.title.split()
@@ -38,7 +45,7 @@ def count_tickers(reddit, ticker_dict):
         add_to_dict(word_in_content, ticker_dict, ticker_count)
 
     sorted_ticker_count = dict(
-        sorted(ticker_count.items(), key=lambda item: item[1], reverse=True)[:TOTAL_NUMBER_OF_STOCK])
+        sorted(ticker_count.items(), key=lambda item: item[1], reverse=True)[:TOTAL_NUMBER_OF_STOCKS])
 
     return sorted_ticker_count
 
@@ -54,6 +61,16 @@ def add_to_dict(word_in_post, ticker_dict, ticker_count):
             ticker_count[clean_word] = ticker_count.get(clean_word, 0) + 1
 
 
+# Helper function to determine if Yahoo Finance can provide the relevant information
+# If not, we skip this stock
+def found_all_fields(stock_info):
+    for field in YF_INFO_FIELDS:
+        if field not in stock_info.keys():
+            return False
+
+    return True
+
+
 # Packages the top10 tickers and related financial information into dictionaries
 # Inserts this information into the database with time stamps
 def insert_to_db(sorted_ticker_dict, ticker_dict):
@@ -63,25 +80,35 @@ def insert_to_db(sorted_ticker_dict, ticker_dict):
 
     now = datetime.now()
 
-    for i in range(TOTAL_NUMBER_OF_STOCK):
+    for i in range(TOTAL_NUMBER_OF_STOCKS):
+
         output_ticker = sorted_ticker_list[i]
         output_count = sorted_ticker_dict[output_ticker]
         stock_info = yf.Ticker(output_ticker).info
+
+        if not found_all_fields(stock_info):
+            continue
+
         entry = {
-            "rank": i + 1,
-            "ticker": output_ticker,
-            "name": ticker_dict[output_ticker],
-            "industry": stock_info["industry"],
-            "count": output_count,
-            "previousClose": stock_info["previousClose"],
-            "fiftyDayAverage": stock_info["fiftyDayAverage"],
-            "averageDailyVolume10Day": stock_info["averageDailyVolume10Day"],
-            "timeStamp": now
+            'rank': len(toDB) + 1,
+            'ticker': output_ticker,
+            'name': ticker_dict[output_ticker],
+            'industry': stock_info.get('industry', ''),
+            'count': output_count,
+            'previousClose': stock_info.get('previousClose', ''),
+            'fiftyDayAverage': stock_info.get('fiftyDayAverage', ''),
+            'averageDailyVolume10Day': stock_info.get('averageDailyVolume10Day', ''),
+            'timeStamp': now
         }
+
         toDB.append(entry)
 
+        if len(toDB) == TOTAL_NUMBER_TO_PRESENT:
+            break
+
+    print(toDB)
     client = MongoClient(os.environ['DB_URL'])
-    collection = client["findMyGME"]["stocks"]
+    collection = client['findMyGME']['stocks']
     collection.insert_many(toDB)
 
 
@@ -95,8 +122,8 @@ def main():
 
     # Creates a combined NASDAQ and NYSE stock ticker dictionary
     ticker_dict = {}
-    build_dictionary("tickers/NASDAQ.txt", ticker_dict)
-    build_dictionary("tickers/NYSE.txt", ticker_dict)
+    build_dictionary('tickers/NASDAQ.txt', ticker_dict)
+    build_dictionary('tickers/NYSE.txt', ticker_dict)
 
     # Counts the appearances of tickers in the top500 hot posts in WSB
     # Filters out the abbreviations that generally do not represent stock tickers
