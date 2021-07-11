@@ -16,7 +16,7 @@ TOTAL_NUMBER_OF_STOCKS = 20
 TICKER_BLACKLIST = ['A', 'ALL', 'ARE', 'AT', 'CEO', 'DD', 'EDIT', 'EV', 'FOR', 'ON', 'ONE', 'OR', 'RH', 'VERY']
 
 # Information we look for in Yahoo Finance
-yahoo_finance_FIELDS = ['industry', 'previousClose', 'fiftyDayAverage', 'averageDailyVolume10Day']
+YAHOO_FINANCE_FIELDS = ['industry', 'previousClose', 'fiftyDayAverage', 'averageDailyVolume10Day']
 
 
 # Reads, parses and converts the ticker files into dictionary
@@ -64,7 +64,7 @@ def add_to_dict(word_in_post, ticker_dict, ticker_count):
 # Helper function to determine if Yahoo Finance can provide the relevant information
 # If not, we skip this stock
 def has_all_finance_fields(stock_info):
-    for field in yahoo_finance_FIELDS:
+    for field in YAHOO_FINANCE_FIELDS:
         if field not in stock_info.keys():
             return False
 
@@ -73,16 +73,14 @@ def has_all_finance_fields(stock_info):
 
 # Helper function to get the most recent Top 10 stock record from the database
 # Returns a list of ticker symbols, sorted by rank
-def get_prev_stock_list(collection, current_timestamp):
-    latest_timestamp_entry = collection.find({'timeStamp': {'$lte': current_timestamp}}).sort([('timeStamp', -1)]).limit(1)
+def get_prev_stock_list(db_collection, current_timestamp):
+    latest_timestamp_entry = db_collection.find({'timeStamp': {'$lte': current_timestamp}}).sort([('timeStamp', -1)]).limit(1)
 
-    latest_time_stamp = latest_timestamp_entry[0].get('timeStamp')
-    latest_stock_obj_list = collection.find({'timeStamp': latest_time_stamp})
-
-    sorted_stock_list = sorted(latest_stock_obj_list, key=lambda i: i['rank'])
+    latest_timestamp = latest_timestamp_entry[0].get('timeStamp')
+    latest_stock_obj_list = db_collection.find({'timeStamp': latest_timestamp}).sort([('rank', 1)])
 
     latest_stock_list = []
-    for stock_obj in sorted_stock_list:
+    for stock_obj in latest_stock_obj_list:
         latest_stock_list.append(stock_obj.get('ticker'))
 
     return latest_stock_list
@@ -118,7 +116,7 @@ def insert_to_db(sorted_ticker_dict, ticker_dict):
 
     rank = 1
 
-    for i in range(TOTAL_NUMBER_OF_STOCKS):
+    for i in range(len(sorted_ticker_list)):
         output_ticker = sorted_ticker_list[i]
         output_count = sorted_ticker_dict[output_ticker]
         stock_info = yf.Ticker(output_ticker).info
@@ -138,6 +136,7 @@ def insert_to_db(sorted_ticker_dict, ticker_dict):
             'fiftyDayAverage': stock_info.get('fiftyDayAverage', ''),
             'averageDailyVolume10Day': stock_info.get('averageDailyVolume10Day', ''),
             'timeStamp': now,
+            # isNew is a reserved key word in MongoDB
             'newOccur': is_new,
             'rankingChange': ranking_change
         }
